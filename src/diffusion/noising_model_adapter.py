@@ -51,113 +51,93 @@ class NoisingModelAdapter:
         if self.y_classes > 0:
             self.u_y = self.u_y / self.y_classes
 
-    def get_Qt(self, beta_t, device):
+    def get_Qt(self, beta_t, device, t=None):
         """
         Returns one-step transition matrices for X and E, from step t - 1 to step t.
-
-        In the original code, beta_t is passed.
-        However, NoisingModel uses integer t.
-        DiscreteDenoisingDiffusion computes beta_t via its own noise schedule.
-
-        CRITICAL ISSUE: NoisingModel computes alpha internally based on t.
-        DiscreteDenoisingDiffusion computes beta_t and passes it here.
-        If we want to use NoisingModel's definitions, we should ideally use its `get_Q_t(t)`.
-        But `get_Qt` signature only gives us `beta_t` (float values).
-
-        If `beta_t` corresponds to the alphas in NoisingModel (beta = 1 - alpha), we can reconstruct Q_t manually
-        using the marginals stored in NoisingModel, effectively replicating `MarginalUniformTransition` logic
-        but ensuring we use the same marginals `NoisingModel` would have used.
-
-        Actually, `NoisingModel` implementation of `get_Q_t` is:
-        Q = alpha * I + (1 - alpha) * marginals
-
-        This matches `MarginalUniformTransition`:
-        Q = (1 - beta) * I + beta * marginals
-
-        So if beta = 1 - alpha, they are identical.
-
-        Since `DiscreteDenoisingDiffusion` manages the schedule and passes `beta_t`,
-        we should trust `beta_t` to be consistent with what `NoisingModel` expects *conceptually*
-        if we configured the schedule correctly in the main class.
-
-        So we essentially re-implement `MarginalUniformTransition`'s logic here but formally we are "adapting"
-        conceptually.
-
-        BUT, the task is to "Adapt the NoisingModel... to replace MarginalUniformTransition".
-        If I just re-implement the math, I am not really "using" NoisingModel instance for the transition matrices.
-
-        However, `get_Qt` needs `beta_t` (batch of floats). `NoisingModel.get_Q_t` takes integer `t`.
-        We don't have integer `t` here easily (it's abstracted away).
-
-        Wait, `DiscreteDenoisingDiffusion` has `apply_noise` where it samples `t`.
-        But `compute_Lt` calls `get_Qt(noisy_data["beta_t"])`.
-
-        Strategy: Use the `noising_model.n_m` (marginals) and the `beta_t` provided to construct the matrix.
-        This ensures we use the exact distribution stored in NoisingModel.
+        Uses NoisingModel.get_Q_t(t).
         """
-        beta_t = beta_t.unsqueeze(1).to(device)  # (bs, 1)
+        if t is None:
+            # Fallback to manual construction if t is not provided (should not happen with new call sites)
+            # Or raise error to be strict.
+            # For now, let's try to support the legacy way if needed, or just crash if t is missing.
+            # Given the user context, we should use get_Q_t.
+            raise ValueError("t (timestep) is required for NoisingModelAdapter.get_Qt")
 
-        # We use the marginals from the wrapped model
-        u_x = (
-            self.noising_model.n_m.to(device)
-            .unsqueeze(0)
-            .expand(self.X_classes, -1)
-            .unsqueeze(0)
-        )  # (1, dx, dx)
-        u_e = (
-            self.noising_model.e_m.to(device)
-            .unsqueeze(0)
-            .expand(self.E_classes, -1)
-            .unsqueeze(0)
-        )  # (1, de, de)
-        u_y = self.u_y.to(device)
+        # Implementation:
+        t = t.squeeze()  # (bs,) or scalar
+        if t.ndim == 0:
+            t = t.unsqueeze(0)
 
-        # Q_t = (1-beta)*I + beta*M
-        # This is standard transition.
-        q_x = beta_t * u_x + (1 - beta_t) * torch.eye(
-            self.X_classes, device=device
-        ).unsqueeze(0)
-        q_e = beta_t * u_e + (1 - beta_t) * torch.eye(
-            self.E_classes, device=device
-        ).unsqueeze(0)
-        q_y = beta_t * u_y + (1 - beta_t) * torch.eye(
-            self.y_classes, device=device
-        ).unsqueeze(0)
+        bs = t.shape[0]
+        device = self.noising_model.alphas.device  # ensure device match
+
+        # Loop implementation to be safe and compliant
+        q_x_list = []
+        q_e_list = []
+        q_y_list = []
+
+        for i in range(bs):
+            idx = t[i].item()
+            idx = max(0, min(idx, self.noising_model.T - 1))
+
+            qx, qe = self.noising_model.get_Q_t(idx)
+            q_x_list.append(qx)
+            q_e_list.append(qe)
+
+            # y transition
+            # qt_y = alpha I + (1-alpha) u_y ...
+            alpha = self.noising_model.alphas[idx]
+            qy = (
+                alpha * torch.eye(self.y_classes, device=device)
+                + (1 - alpha) * self.u_y
+            )
+            q_y_list.append(qy)
+
+        q_x = torch.stack(q_x_list).to(device)
+        q_e = torch.stack(q_e_list).to(device)
+        q_y = torch.stack(q_y_list).to(device)
 
         return utils.PlaceHolder(X=q_x, E=q_e, y=q_y)
 
-    def get_Qt_bar(self, alpha_bar_t, device):
+    def get_Qt_bar(self, alpha_bar_t, device, t=None):
         """
         Returns t-step transition matrices.
-        Q_bar = alpha_bar * I + (1 - alpha_bar) * M
+        Uses NoisingModel.get_Q_bar_t(t).
         """
-        alpha_bar_t = alpha_bar_t.unsqueeze(1).to(device)
+        if t is None:
+            raise ValueError(
+                "t (timestep) is required for NoisingModelAdapter.get_Qt_bar"
+            )
 
-        u_x = (
-            self.noising_model.n_m.to(device)
-            .unsqueeze(0)
-            .expand(self.X_classes, -1)
-            .unsqueeze(0)
-        )
-        u_e = (
-            self.noising_model.e_m.to(device)
-            .unsqueeze(0)
-            .expand(self.E_classes, -1)
-            .unsqueeze(0)
-        )
-        u_y = self.u_y.to(device)
+        t = t.squeeze()
+        if t.ndim == 0:
+            t = t.unsqueeze(0)
 
-        q_x = (
-            alpha_bar_t * torch.eye(self.X_classes, device=device).unsqueeze(0)
-            + (1 - alpha_bar_t) * u_x
-        )
-        q_e = (
-            alpha_bar_t * torch.eye(self.E_classes, device=device).unsqueeze(0)
-            + (1 - alpha_bar_t) * u_e
-        )
-        q_y = (
-            alpha_bar_t * torch.eye(self.y_classes, device=device).unsqueeze(0)
-            + (1 - alpha_bar_t) * u_y
-        )
+        bs = t.shape[0]
+        # device = self.noising_model.alphas_bar.device
+
+        q_x_list = []
+        q_e_list = []
+        q_y_list = []
+
+        for i in range(bs):
+            idx = t[i].item()
+            idx = max(0, min(idx, self.noising_model.T - 1))
+
+            qx, qe = self.noising_model.get_Q_bar_t(idx)
+            q_x_list.append(qx)
+            q_e_list.append(qe)
+
+            # y transition
+            alpha_bar = self.noising_model.alphas_bar[idx]
+            qy = (
+                alpha_bar * torch.eye(self.y_classes, device=device)
+                + (1 - alpha_bar) * self.u_y
+            )
+            q_y_list.append(qy)
+
+        q_x = torch.stack(q_x_list).to(device)
+        q_e = torch.stack(q_e_list).to(device)
+        q_y = torch.stack(q_y_list).to(device)
 
         return utils.PlaceHolder(X=q_x, E=q_e, y=q_y)

@@ -443,7 +443,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         Ts = self.T * ones
         alpha_t_bar = self.noise_schedule.get_alpha_bar(t_int=Ts)  # (bs, 1)
 
-        Qtb = self.transition_model.get_Qt_bar(alpha_t_bar, self.device)
+        Qtb = self.transition_model.get_Qt_bar(alpha_t_bar, self.device, t=Ts)
 
         # Compute transition probabilities
         probX = X @ Qtb.X  # (bs, n, dx_out)
@@ -482,9 +482,15 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         pred_probs_E = F.softmax(pred.E, dim=-1)
         pred_probs_y = F.softmax(pred.y, dim=-1)
 
-        Qtb = self.transition_model.get_Qt_bar(noisy_data["alpha_t_bar"], self.device)
-        Qsb = self.transition_model.get_Qt_bar(noisy_data["alpha_s_bar"], self.device)
-        Qt = self.transition_model.get_Qt(noisy_data["beta_t"], self.device)
+        Qtb = self.transition_model.get_Qt_bar(
+            noisy_data["alpha_t_bar"], self.device, t=noisy_data["t_int"]
+        )
+        Qsb = self.transition_model.get_Qt_bar(
+            noisy_data["alpha_s_bar"], self.device, t=noisy_data["t_int"] - 1
+        )
+        Qt = self.transition_model.get_Qt(
+            noisy_data["beta_t"], self.device, t=noisy_data["t_int"]
+        )
 
         # Compute distributions to compare with KL
         bs, n, d = X.shape
@@ -535,7 +541,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         # Compute noise values for t = 0.
         t_zeros = torch.zeros_like(t)
         beta_0 = self.noise_schedule(t_zeros)
-        Q0 = self.transition_model.get_Qt(beta_t=beta_0, device=self.device)
+        Q0 = self.transition_model.get_Qt(beta_t=beta_0, device=self.device, t=t_zeros)
 
         probX0 = X @ Q0.X  # (bs, n, dx_out)
         probE0 = E @ Q0.E.unsqueeze(1)  # (bs, n, n, de_out)
@@ -599,7 +605,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         alpha_t_bar = self.noise_schedule.get_alpha_bar(t_normalized=t_float)  # (bs, 1)
 
         Qtb = self.transition_model.get_Qt_bar(
-            alpha_t_bar, device=self.device
+            alpha_t_bar, device=self.device, t=t_int
         )  # (bs, dx_in, dx_out), (bs, de_in, de_out)
         assert (abs(Qtb.X.sum(dim=2) - 1.0) < 1e-4).all(), Qtb.X.sum(dim=2) - 1
         assert (abs(Qtb.E.sum(dim=2) - 1.0) < 1e-4).all()
@@ -821,10 +827,13 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         alpha_s_bar = self.noise_schedule.get_alpha_bar(t_normalized=s)
         alpha_t_bar = self.noise_schedule.get_alpha_bar(t_normalized=t)
 
+        t_int = torch.round(t * self.T).long()
+        s_int = torch.round(s * self.T).long()
+
         # Retrieve transitions matrix
-        Qtb = self.transition_model.get_Qt_bar(alpha_t_bar, self.device)
-        Qsb = self.transition_model.get_Qt_bar(alpha_s_bar, self.device)
-        Qt = self.transition_model.get_Qt(beta_t, self.device)
+        Qtb = self.transition_model.get_Qt_bar(alpha_t_bar, self.device, t=t_int)
+        Qsb = self.transition_model.get_Qt_bar(alpha_s_bar, self.device, t=s_int)
+        Qt = self.transition_model.get_Qt(beta_t, self.device, t=t_int)
 
         # Neural net predictions
         noisy_data = {
