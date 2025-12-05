@@ -12,6 +12,7 @@ from diffusion.noise_schedule import (
     PredefinedNoiseScheduleDiscrete,
     MarginalUniformTransition,
 )
+from src.diffusion.noising_model_adapter import NoisingModelAdapter
 from src.diffusion import diffusion_utils
 from metrics.train_metrics import TrainLossDiscrete
 from metrics.abstract_metrics import SumExceptBatchMetric, SumExceptBatchKL, NLL
@@ -110,6 +111,26 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 x_marginals=x_marginals,
                 e_marginals=e_marginals,
                 y_classes=self.ydim_output,
+            )
+            self.limit_dist = utils.PlaceHolder(
+                X=x_marginals,
+                E=e_marginals,
+                y=torch.ones(self.ydim_output) / self.ydim_output,
+            )
+        elif cfg.model.transition == "noising_model":
+            node_types = self.dataset_info.node_types.float()
+            x_marginals = node_types / torch.sum(node_types)
+
+            edge_types = self.dataset_info.edge_types.float()
+            e_marginals = edge_types / torch.sum(edge_types)
+            print(
+                f"Marginal distribution of the classes: {x_marginals} for nodes, {e_marginals} for edges"
+            )
+            self.transition_model = NoisingModelAdapter(
+                x_marginals=x_marginals,
+                e_marginals=e_marginals,
+                y_classes=self.ydim_output,
+                diffusion_steps=cfg.model.diffusion_steps,
             )
             self.limit_dist = utils.PlaceHolder(
                 X=x_marginals,
