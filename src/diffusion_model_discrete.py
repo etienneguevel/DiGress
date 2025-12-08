@@ -132,6 +132,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
                 y_classes=self.ydim_output,
                 diffusion_steps=cfg.model.diffusion_steps,
             )
+            if cfg.general.gpus > 0:
+                self.transition_model.noising_model.move_to(torch.device("cuda"))
+
             self.limit_dist = utils.PlaceHolder(
                 X=x_marginals,
                 E=e_marginals,
