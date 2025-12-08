@@ -46,6 +46,8 @@ class NoisingModelAdapter:
             noise_schedule_type="cosine",
         )
 
+        self.data_type = self.noising_model.alphas.dtype
+
         # 'y' is not handled by NoisingModel, so we keep the functionality from MarginalUniformTransition
         self.u_y = torch.ones(1, self.y_classes, self.y_classes)
         if self.y_classes > 0:
@@ -77,7 +79,7 @@ class NoisingModelAdapter:
         q_y_list = []
 
         for i in range(bs):
-            idx = t[i].item()
+            idx = int(t[i].item())
             idx = max(0, min(idx, self.noising_model.T - 1))
 
             qx, qe = self.noising_model.get_Q_t(idx)
@@ -121,7 +123,7 @@ class NoisingModelAdapter:
         q_y_list = []
 
         for i in range(bs):
-            idx = t[i].item()
+            idx = int(t[i].item())
             idx = max(0, min(idx, self.noising_model.T - 1))
 
             qx, qe = self.noising_model.get_Q_bar_t(idx)

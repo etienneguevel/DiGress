@@ -128,21 +128,15 @@ class GnnNodeEdgesAdapter(nn.Module):
         # But DiGress passes One-Hot floats.
         # We need to convert One-Hot to Indices.
 
-        # X (bs, n, dx) -> N_indices (bs, n) take argmax of first 'natoms' dimensions.
+        # X (bs, n, dx) -> N_onehot (bs, n, natoms)
         N_onehot = X[..., : self.natoms]
-        N_indices = torch.argmax(N_onehot, dim=-1).long()
 
         # Extra features
         pos_emb = X[..., self.natoms :]  # (bs, n, extra_dim)
 
-        # E (bs, n, n, de) -> E_indices (bs, n, n)
-        # Note: input_dims['E'] should match self.nbonds usually.
-        E_indices = torch.argmax(E[..., : self.nbonds], dim=-1).long()
+        # E (bs, n, n, de) -> E_onehot (bs, n, n, nbonds)
+        E_onehot = E[..., : self.nbonds]
 
-        # Mask
-        mask = node_mask.unsqueeze(
-            -1
-        )  # (bs, n, 1) usually expected by some GNNs, or (bs, n)
         # GnnNodeEdges forward says: mask: torch.Tensor
         # And passes it to layers.
         # Let's check AttentionLayer.
@@ -155,7 +149,7 @@ class GnnNodeEdgesAdapter(nn.Module):
         # Reuse logic from GnnNodeEdges.forward but capturing y
 
         h_out, e_out, y_out, mask_out = self._forward_gnn_logic(
-            N_indices, E_indices, pos_emb, y, node_mask
+            N_onehot, E_onehot, pos_emb, y, node_mask
         )
 
         # Output of GnnNodeEdges layer is (h, e, y, mask)
@@ -199,10 +193,6 @@ class GnnNodeEdgesAdapter(nn.Module):
     def _forward_gnn_logic(self, N, E, pos_emb, y, mask):
         # Re-implementing the loop to capture intermediate y and ensure outputs are what we expect.
         # Accessing self.gnn.layers
-
-        # Initial mask handling
-        if mask.dim() == 2:
-            mask = mask.unsqueeze(-1)  # (bs, n, 1)
 
         N_in = None  # Residuals handled inside GnnNodeEdges layers?
         # GnnNodeEdges code:

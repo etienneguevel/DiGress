@@ -134,6 +134,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             )
             if cfg.general.gpus > 0:
                 self.transition_model.noising_model.move_to(torch.device("cuda"))
+                self.transition_model.u_y = self.transition_model.u_y.to(
+                    torch.device("cuda")
+                )
 
             self.limit_dist = utils.PlaceHolder(
                 X=x_marginals,
@@ -859,9 +862,17 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
 
         if isinstance(self.transition_model, NoisingModelAdapter):
             t_val = int(t_int[0].item())
+            X_t = X_t.to(self.transition_model.data_type)
+            E_t = E_t.to(self.transition_model.data_type)
             p_s_and_t_given_0_X, p_s_and_t_given_0_E = (
                 self.transition_model.noising_model.get_posterior(X_t, E_t, t_val)
             )
+
+            # Reshape the posteriors to match the dims of the predictions
+            p_s_and_t_given_0_E = p_s_and_t_given_0_E.reshape(
+                (bs, -1, p_s_and_t_given_0_E.shape[-2], p_s_and_t_given_0_E.shape[-1])
+            )
+
         else:
             p_s_and_t_given_0_X = (
                 diffusion_utils.compute_batched_over0_posterior_distribution(
