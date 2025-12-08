@@ -229,10 +229,6 @@ def main(cfg: DictConfig):
         callbacks.append(last_ckpt_save)
         callbacks.append(checkpoint_callback)
 
-    if cfg.train.ema_decay > 0:
-        ema_callback = utils.EMA(decay=cfg.train.ema_decay)
-        callbacks.append(ema_callback)
-
     name = cfg.general.name
     if name == "debug":
         print("[WARNING]: Run is called 'debug' -- it will run with fast_dev_run. ")

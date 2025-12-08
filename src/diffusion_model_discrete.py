@@ -857,17 +857,23 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         pred_X = F.softmax(pred.X, dim=-1)  # bs, n, d0
         pred_E = F.softmax(pred.E, dim=-1)  # bs, n, n, d0
 
-        p_s_and_t_given_0_X = (
-            diffusion_utils.compute_batched_over0_posterior_distribution(
-                X_t=X_t, Qt=Qt.X, Qsb=Qsb.X, Qtb=Qtb.X
+        if isinstance(self.transition_model, NoisingModelAdapter):
+            t_val = int(t_int[0].item())
+            p_s_and_t_given_0_X, p_s_and_t_given_0_E = (
+                self.transition_model.noising_model.get_posterior(X_t, E_t, t_val)
             )
-        )
+        else:
+            p_s_and_t_given_0_X = (
+                diffusion_utils.compute_batched_over0_posterior_distribution(
+                    X_t=X_t, Qt=Qt.X, Qsb=Qsb.X, Qtb=Qtb.X
+                )
+            )
 
-        p_s_and_t_given_0_E = (
-            diffusion_utils.compute_batched_over0_posterior_distribution(
-                X_t=E_t, Qt=Qt.E, Qsb=Qsb.E, Qtb=Qtb.E
+            p_s_and_t_given_0_E = (
+                diffusion_utils.compute_batched_over0_posterior_distribution(
+                    X_t=E_t, Qt=Qt.E, Qsb=Qsb.E, Qtb=Qtb.E
+                )
             )
-        )
         # Dim of these two tensors: bs, N, d0, d_t-1
         weighted_X = pred_X.unsqueeze(-1) * p_s_and_t_given_0_X  # bs, n, d0, d_t-1
         unnormalized_prob_X = weighted_X.sum(dim=2)  # bs, n, d_t-1
