@@ -107,6 +107,8 @@ class GnnNodeEdgesAdapter(nn.Module):
             last_layer="mlp",  # As in gnn.py example
         )
 
+        self.y_out_proj = nn.Linear(self.dy, self.global_features_dim)
+
     def forward(self, X, E, y, node_mask):
         """
         X: (bs, n, input_dims['X'])
@@ -191,38 +193,10 @@ class GnnNodeEdgesAdapter(nn.Module):
         return PlaceHolder(X=h_out, E=e_out, y=y_out).mask(node_mask)
 
     def _forward_gnn_logic(self, N, E, pos_emb, y, mask):
-        # Re-implementing the loop to capture intermediate y and ensure outputs are what we expect.
-        # Accessing self.gnn.layers
-
-        N_in = None  # Residuals handled inside GnnNodeEdges layers?
-        # GnnNodeEdges code:
-        # "h = h + N_in" at the end.
-
         # Initial Embedding
         # Layer 0 is EmbeddingLaplacian
         h, e, y, mask = self.gnn.layers[0](N, E, y, pos_emb, mask)
         e = 1 / 2 * (e + e.transpose(1, 2))
-
-        N_in_res = h  # Is this correct? GnnNodeEdges saves N_in = N (input indices).
-        # But you can't add Indices to Hidden Features.
-        # Wait, GnnNodeEdges code says:
-        # N_in = N
-        # ...
-        # h = h + N_in
-        # If N is indices, this crashes.
-        # UNLESS N is already embedded? No, EmbeddingLaplacian takes N (indices).
-        # This looks like a bug or I misunderstood GnnNodeEdges code.
-        # "h = h + N_in" -> if N_in is (bs, n) Long and h is (bs, n, d) Float -> Error/Broadcasting weirdness.
-        # Let's assume there's no residual on the INPUT indices in the adapter for now, or GNN code assumes N is features?
-        # The GNN code docstring says "N: torch.Tensor".
-        # EmbeddingLaplacian: "self.embedding_nodes(N)".
-        # It implies N is indices.
-        # So "h + N_in" must be wrong in GnnNodeEdges or I am misreading.
-
-        # Ah, maybe N_in is meant to be the initial embedding?
-        # But the code says "N_in = N" right at start.
-        # I will IGNore the residual from INPUT INDICES for now as it seems suspect or requires specific handling.
-        # I will implement standard resnet structure if needed.
 
         # Loop over middle layers (AttentionLayer)
         for i in range(1, len(self.gnn.layers) - 1):
@@ -234,24 +208,9 @@ class GnnNodeEdgesAdapter(nn.Module):
         last_layer = self.gnn.layers[-1]
 
         # We need y prediction.
-        # y is currently the hidden y state.
-        # We can project it to output_dims['y'] using a new linear layer in adapter
-        # because MLPNodeEdge discards it.
-
         y_final_hidden = y
 
-        # Run last layer (MLP) for h and e
         h_out, e_out, _, _ = last_layer(h, e, y, mask)
-
-        # We need to project y_final_hidden to output_dims['y']
-        # I'll add a projection layer to the adapter for this.
-        if not hasattr(self, "y_out_proj"):
-            # Lazy init or defined in __init__
-            device = y.device
-            dtype = y.dtype
-            self.y_out_proj = nn.Linear(
-                self.dy, self.global_features_dim, device=device, dtype=dtype
-            )
 
         y_out = self.y_out_proj(y_final_hidden)
 
