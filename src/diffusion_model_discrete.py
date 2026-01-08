@@ -871,7 +871,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             # Reshape the posteriors to match the dims of the predictions
             p_s_and_t_given_0_E = p_s_and_t_given_0_E.reshape(
                 (bs, -1, p_s_and_t_given_0_E.shape[-2], p_s_and_t_given_0_E.shape[-1])
-            )
+            )  # bs, n * n, d0, d_t-1
 
         else:
             p_s_and_t_given_0_X = (
@@ -893,8 +893,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             unnormalized_prob_X, dim=-1, keepdim=True
         )  # bs, n, d_t-1
 
-        pred_E = pred_E.reshape((bs, -1, pred_E.shape[-1]))
-        weighted_E = pred_E.unsqueeze(-1) * p_s_and_t_given_0_E  # bs, N, d0, d_t-1
+        pred_E = pred_E.reshape((bs, -1, pred_E.shape[-1]))  # bs, n * n, d0
+        weighted_E = pred_E.unsqueeze(-1) * p_s_and_t_given_0_E  # bs, n * n, d0, d_t-1
         unnormalized_prob_E = weighted_E.sum(dim=-2)
         unnormalized_prob_E[torch.sum(unnormalized_prob_E, dim=-1) == 0] = 1e-5
         prob_E = unnormalized_prob_E / torch.sum(
