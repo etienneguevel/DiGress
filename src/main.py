@@ -2,6 +2,7 @@
 import os
 import pathlib
 import warnings
+from pathlib import Path
 
 import torch
 
@@ -101,7 +102,9 @@ def main(cfg: DictConfig):
 
         if cfg.model.type == "discrete" and cfg.model.extra_features is not None:
             extra_features = ExtraFeatures(
-                cfg.model.extra_features, dataset_info=dataset_infos
+                cfg.model.extra_features,
+                dataset_info=dataset_infos,
+                num_ev=cfg.model.num_ev,
             )
         else:
             extra_features = DummyExtraFeatures()
@@ -210,6 +213,8 @@ def main(cfg: DictConfig):
         model = DiscreteDenoisingDiffusion(
             cfg=cfg, model_cls=GnnNodeEdgesAdapter, **model_kwargs
         )
+        print(f"Using denoising model {type(model.model)}")
+
     else:
         model = LiftedDenoisingDiffusion(cfg=cfg, **model_kwargs)
 
@@ -250,8 +255,18 @@ def main(cfg: DictConfig):
 
     if not cfg.general.test_only:
         trainer.fit(model, datamodule=datamodule, ckpt_path=cfg.general.resume)
+
+        if isinstance(model.model_cls, GnnNodeEdgesAdapter):
+            gnn_model = model.model.gnn
+            save_path = (
+                Path(__file__).parent.parent / "outputs" / f"gnn_{cfg.general.name}.pt"
+            )
+            print(f"Saving GNN model to {save_path}")
+            torch.save(gnn_model.state_dict(), save_path)
+
         if cfg.general.name not in ["debug", "test"]:
             trainer.test(model, datamodule=datamodule)
+
     else:
         # Start by evaluating test_only_path
         trainer.test(model, datamodule=datamodule, ckpt_path=cfg.general.test_only)

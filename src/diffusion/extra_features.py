@@ -17,12 +17,13 @@ class DummyExtraFeatures:
 
 
 class ExtraFeatures:
-    def __init__(self, extra_features_type, dataset_info):
+    def __init__(self, extra_features_type, dataset_info, num_ev=None):
         self.max_n_nodes = dataset_info.max_n_nodes
         self.ncycles = NodeCycleFeatures()
         self.features_type = extra_features_type
         if extra_features_type in ["eigenvalues", "all"]:
-            self.eigenfeatures = EigenFeatures(mode=extra_features_type)
+            self.eigenfeatures = EigenFeatures(mode=extra_features_type, num_ev=num_ev)
+            self.num_ev = num_ev
 
     def __call__(self, noisy_data):
         n = noisy_data["node_mask"].sum(dim=1).unsqueeze(1) / self.max_n_nodes
@@ -87,9 +88,10 @@ class EigenFeatures:
     Code taken from : https://github.com/Saro00/DGN/blob/master/models/pytorch/eigen_agg.py
     """
 
-    def __init__(self, mode):
+    def __init__(self, mode, num_ev=None):
         """mode: 'eigenvalues' or 'all'"""
         self.mode = mode
+        self.num_ev = num_ev
 
     def __call__(self, noisy_data):
         E_t = noisy_data["E_t"]
@@ -111,7 +113,7 @@ class EigenFeatures:
             eigvals = eigvals.type_as(A) / torch.sum(mask, dim=1, keepdim=True)
 
             n_connected_comp, batch_eigenvalues = get_eigenvalues_features(
-                eigenvalues=eigvals
+                eigenvalues=eigvals, k=self.num_ev
             )
             return n_connected_comp.type_as(A), batch_eigenvalues.type_as(A)
 
@@ -127,7 +129,7 @@ class EigenFeatures:
             eigvectors = eigvectors * mask.unsqueeze(2) * mask.unsqueeze(1)
             # Retrieve eigenvalues features
             n_connected_comp, batch_eigenvalues = get_eigenvalues_features(
-                eigenvalues=eigvals
+                eigenvalues=eigvals, k=self.num_ev
             )
 
             # Retrieve eigenvectors features
@@ -135,6 +137,7 @@ class EigenFeatures:
                 vectors=eigvectors,
                 node_mask=noisy_data["node_mask"],
                 n_connected=n_connected_comp,
+                k=self.num_ev,
             )
             return (
                 n_connected_comp,
@@ -177,6 +180,9 @@ def get_eigenvalues_features(eigenvalues, k=5):
     node_mask: (bs, n)
     k: num of non zero eigenvalues to keep
     """
+    if not k:
+        k = 5
+
     ev = eigenvalues
     bs, n = ev.shape
     n_connected_components = (ev < 1e-5).sum(dim=-1)
@@ -201,6 +207,9 @@ def get_eigenvectors_features(vectors, node_mask, n_connected, k=2):
         not_lcc_indicator : indicator vectors of largest connected component (lcc) for each graph  -- (bs, n, 1)
         k_lowest_eigvec : k first eigenvectors for the largest connected component   -- (bs, n, k)
     """
+    if not k:
+        k = 2
+
     bs, n = vectors.size(0), vectors.size(1)
 
     # Create an indicator for the nodes outside the largest connected components
