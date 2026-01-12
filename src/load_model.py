@@ -99,7 +99,9 @@ def main(cfg: DictConfig):
 
         if cfg.model.type == "discrete" and cfg.model.extra_features is not None:
             extra_features = ExtraFeatures(
-                cfg.model.extra_features, dataset_info=dataset_infos
+                cfg.model.extra_features,
+                dataset_info=dataset_infos,
+                num_ev=cfg.model.num_ev,
             )
             domain_features = ExtraMolecularFeatures(dataset_infos=dataset_infos)
         else:
