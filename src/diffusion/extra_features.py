@@ -26,15 +26,12 @@ class ExtraFeatures:
             self.num_ev = num_ev
 
     def __call__(self, noisy_data):
-        n = noisy_data["node_mask"].sum(dim=1).unsqueeze(1) / self.max_n_nodes
         x_cycles, y_cycles = self.ncycles(noisy_data)  # (bs, n_cycles)
 
         if self.features_type == "cycles":
             E = noisy_data["E_t"]
             extra_edge_attr = torch.zeros((*E.shape[:-1], 0)).type_as(E)
-            return utils.PlaceHolder(
-                X=x_cycles, E=extra_edge_attr, y=torch.hstack((n, y_cycles))
-            )
+            return utils.PlaceHolder(X=x_cycles, E=extra_edge_attr, y=y_cycles)
 
         elif self.features_type == "eigenvalues":
             eigenfeatures = self.eigenfeatures(noisy_data)
@@ -44,7 +41,7 @@ class ExtraFeatures:
             return utils.PlaceHolder(
                 X=x_cycles,
                 E=extra_edge_attr,
-                y=torch.hstack((n, y_cycles, n_components, batched_eigenvalues)),
+                y=torch.hstack((n_components, batched_eigenvalues, y_cycles)),
             )
         elif self.features_type == "all":
             eigenfeatures = self.eigenfeatures(noisy_data)
@@ -56,9 +53,9 @@ class ExtraFeatures:
             # (bs, n, 1), (bs, n, 2)
 
             return utils.PlaceHolder(
-                X=torch.cat((x_cycles, nonlcc_indicator, k_lowest_eigvec), dim=-1),
+                X=torch.cat((nonlcc_indicator, k_lowest_eigvec, x_cycles), dim=-1),
                 E=extra_edge_attr,
-                y=torch.hstack((n, y_cycles, n_components, batched_eigenvalues)),
+                y=torch.hstack((n_components, batched_eigenvalues, y_cycles)),
             )
         else:
             raise ValueError(f"Features type {self.features_type} not implemented")
