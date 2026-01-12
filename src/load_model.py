@@ -134,9 +134,13 @@ def main(cfg: DictConfig):
     else:
         raise NotImplementedError("Unknown dataset {}".format(cfg["dataset"]))
 
-    model_path = (
-        "/home/guevel/Documents/annotix/DiGress/outputs/digress_qm9_default.ckpt"
-    )
+    if hasattr(cfg, "model_path") and cfg.model_path:
+        model_path = cfg.model_path
+    else:
+        raise ValueError(
+            "Please provide a model_path via CLI: +model_path=/path/to/ckpt"
+        )
+
     model = DiscreteDenoisingDiffusion.load_from_checkpoint(
         model_path,
         weights_only=False,
@@ -147,8 +151,13 @@ def main(cfg: DictConfig):
     print(type(model.model))
     print(model.model)
 
-    saving_path = "outputs/digress_qm9_default.pth"
-    # torch.save(model.model.gnn.state_dict(), Path(__file__).parent.parent / saving_path)
+    if hasattr(cfg, "saving_path") and cfg.saving_path:
+        saving_path = cfg.saving_path
+    else:
+        raise ValueError(
+            "Please provide a saving_path via CLI: +saving_path=output.pth"
+        )
+
     torch.save(model.model.gnn, Path(__file__).parent.parent / saving_path)
 
 
